@@ -204,4 +204,4 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`🚀 AMI Backend running on port ${PORT}`);
-}); 
+}); // Updated CORS config Thu Jun 12 22:14:28 +08 2025

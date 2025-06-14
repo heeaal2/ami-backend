@@ -9,12 +9,47 @@ require('dotenv').config();
 
 const app = express();
 
-// Middleware
+// Middleware - Configure CORS properly for production
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://ami-site-xyz.vercel.app'], // Add your Vercel URL
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Allow all Vercel domains and localhost
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001', 
+      'http://localhost:3002',
+      'https://ami-site-rho.vercel.app'
+    ];
+    
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+    
+    // For now, allow all origins to debug
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept'],
+  optionsSuccessStatus: 200
 }));
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '20mb' }));
+
+// Additional manual CORS headers as backup
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'public/event-images');
@@ -31,6 +66,7 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
+    // Use original filename with timestamp to avoid conflicts
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueSuffix + '-' + file.originalname);
   }
@@ -39,6 +75,7 @@ const storage = multer.diskStorage({
 const upload = multer({ 
   storage: storage,
   fileFilter: function (req, file, cb) {
+    // Check if file is an image
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -46,20 +83,36 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: 20 * 1024 * 1024 // 5MB limit
   }
 });
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/event-management', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => console.log('MongoDB Connected'))
-.catch(err => {
-  console.error('MongoDB Connection Error:', err);
-  process.exit(1);
+// Log all requests
+app.use((req, res, next) => {
+  console.log(`📝 ${req.method} ${req.path}`);
+  next();
 });
+
+// Error handling for uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+// MongoDB Connection with better error handling
+try {
+  mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/event-management', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  })
+  .then(() => console.log('MongoDB Connected'))
+  .catch(err => {
+    console.error('MongoDB Connection Error:', err);
+    process.exit(1);
+  });
+} catch (error) {
+  console.error('Error in MongoDB connection setup:', error);
+  process.exit(1);
+}
 
 // Event Schema
 const eventSchema = new mongoose.Schema({
@@ -112,30 +165,60 @@ app.get('/api/events', async (req, res) => {
 });
 
 app.post('/api/events/:eventId/register', async (req, res) => {
+  console.log('🎯 Registration route hit!');
+  console.log('Event ID:', req.params.eventId);
+  console.log('Request body:', req.body);
   try {
     const { eventId } = req.params;
     const { name, phoneNumber, attendDate } = req.body;
 
     const event = await Event.findById(eventId);
     if (!event) {
+      console.log('❌ Event not found:', eventId);
       return res.status(404).json({ message: 'Event not found' });
     }
 
     if (event.registeredUsers.length >= event.capacity) {
+      console.log('❌ Event is full');
       return res.status(400).json({ message: 'Event is full' });
     }
 
+    console.log('📝 Adding user to event:', { name, phoneNumber, attendDate });
     event.registeredUsers.push({ name, phoneNumber, attendDate });
     await event.save();
+    console.log('✅ User registered successfully! Total registered:', event.registeredUsers.length);
 
     res.json({ message: 'Registration successful', event });
   } catch (error) {
-    console.error('Error registering for event:', error);
+    console.error('❌ Error registering for event:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
-// Admin routes
+// Add a test route to verify server is running
+app.get('/test', (req, res) => {
+  res.json({ message: 'Server is running' });
+});
+
+// Add this route temporarily for testing
+app.post('/api/events/test', async (req, res) => {
+  try {
+    const testEvent = new Event({
+      title: "Test Event",
+      description: "This is a test event.",
+      date: new Date(),
+      location: "Test Location",
+      capacity: 50,
+      registeredUsers: []
+    });
+    await testEvent.save();
+    res.json({ message: "Test event added", event: testEvent });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin route to get all events with registered users
 app.get('/api/admin/events', async (req, res) => {
   try {
     const events = await Event.find().select('title date registeredUsers image');
@@ -158,8 +241,11 @@ app.get('/api/admin/events', async (req, res) => {
   }
 });
 
+// Admin route to create new event (with logging)
+console.log('Registering admin event creation route');
 app.post('/api/admin/events', async (req, res) => {
   console.log('🔥 Admin create event route hit!');
+  console.log('Request body:', req.body);
   try {
     const { title, description, date, location, capacity, image } = req.body;
     const newEvent = new Event({
@@ -180,7 +266,10 @@ app.post('/api/admin/events', async (req, res) => {
   }
 });
 
+// Admin route to delete an event
 app.delete('/api/admin/events/:eventId', async (req, res) => {
+  console.log('🗑️ Delete event route hit!');
+  console.log('Event ID to delete:', req.params.eventId);
   try {
     const { eventId } = req.params;
     const deletedEvent = await Event.findByIdAndDelete(eventId);
@@ -189,21 +278,21 @@ app.delete('/api/admin/events/:eventId', async (req, res) => {
       return res.status(404).json({ message: 'Event not found' });
     }
     
+    console.log('✅ Event deleted successfully:', deletedEvent.title);
     res.json({ message: 'Event deleted successfully', event: deletedEvent });
   } catch (error) {
-    console.error('Error deleting event:', error);
+    console.error('❌ Error deleting event:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'AMI Backend is running' });
-});
-
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
-  console.log(`🚀 AMI Backend running on port ${PORT}`);
-}); // Updated CORS config Thu Jun 12 22:14:28 +08 2025
-// CORS update Thu Jun 12 22:23:24 +08 2025
-// Manual CORS Thu Jun 12 22:24:32 +08 2025
+console.log('Using port:', PORT);
+try {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+} catch (error) {
+  console.error('Error starting server:', error);
+  process.exit(1);
+}

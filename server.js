@@ -167,7 +167,11 @@ app.post('/api/upload', (req, res) => {
         path: req.file.path
       });
       
-      const imagePath = `/event-images/${req.file.filename}`;
+      // Return full URL for production, relative path for development
+      const baseUrl = process.env.NODE_ENV === 'production' 
+        ? 'https://ami-backend-g4hd.onrender.com'
+        : 'http://localhost:5001';
+      const imagePath = `${baseUrl}/event-images/${req.file.filename}`;
       console.log('✅ File uploaded successfully:', imagePath);
       res.json({ 
         message: 'File uploaded successfully',
@@ -185,7 +189,19 @@ app.post('/api/upload', (req, res) => {
 app.get('/api/events', async (req, res) => {
   try {
     const events = await Event.find();
-    res.json(events);
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://ami-backend-g4hd.onrender.com'
+      : 'http://localhost:5001';
+    
+    // Convert relative image paths to full URLs
+    const eventsWithFullUrls = events.map(event => ({
+      ...event.toObject(),
+      image: event.image && event.image.startsWith('/') 
+        ? `${baseUrl}${event.image}` 
+        : event.image
+    }));
+    
+    res.json(eventsWithFullUrls);
   } catch (error) {
     console.error('Error fetching events:', error);
     res.status(500).json({ message: error.message });
@@ -263,11 +279,17 @@ app.post('/api/events/test', async (req, res) => {
 app.get('/api/admin/events', async (req, res) => {
   try {
     const events = await Event.find().select('title date registeredUsers image');
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://ami-backend-g4hd.onrender.com'
+      : 'http://localhost:5001';
+    
     const formattedEvents = events.map(event => ({
       _id: event._id,
       eventTitle: event.title,
       eventDate: event.date,
-      image: event.image,
+      image: event.image && event.image.startsWith('/') 
+        ? `${baseUrl}${event.image}` 
+        : event.image, // Convert relative paths to full URLs
       attendees: event.registeredUsers.map(user => ({
         name: user.name,
         phoneNumber: user.phoneNumber,

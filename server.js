@@ -132,25 +132,53 @@ const eventSchema = new mongoose.Schema({
 
 const Event = mongoose.model('Event', eventSchema);
 
+// Test upload route (simple)
+app.post('/api/upload/test', (req, res) => {
+  console.log('🧪 Upload test route hit!');
+  res.json({ message: 'Upload test route is working' });
+});
+
 // File upload route
-app.post('/api/upload', upload.single('image'), (req, res) => {
+app.post('/api/upload', (req, res) => {
   console.log('📸 File upload route hit!');
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' });
+  console.log('Request headers:', req.headers);
+  console.log('Content-Type:', req.get('Content-Type'));
+  
+  // Use multer middleware manually to get better error handling
+  upload.single('image')(req, res, (err) => {
+    if (err) {
+      console.error('❌ Multer error:', err);
+      return res.status(500).json({ message: 'Upload error: ' + err.message });
     }
     
-    const imagePath = `/event-images/${req.file.filename}`;
-    console.log('✅ File uploaded successfully:', imagePath);
-    res.json({ 
-      message: 'File uploaded successfully',
-      imagePath: imagePath,
-      originalName: req.file.originalname
-    });
-  } catch (error) {
-    console.error('❌ Error uploading file:', error);
-    res.status(500).json({ message: error.message });
-  }
+    try {
+      console.log('📁 Upload directory:', uploadsDir);
+      console.log('📁 Directory exists:', fs.existsSync(uploadsDir));
+      
+      if (!req.file) {
+        console.log('❌ No file in request');
+        return res.status(400).json({ message: 'No file uploaded' });
+      }
+      
+      console.log('📄 File details:', {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        path: req.file.path
+      });
+      
+      const imagePath = `/event-images/${req.file.filename}`;
+      console.log('✅ File uploaded successfully:', imagePath);
+      res.json({ 
+        message: 'File uploaded successfully',
+        imagePath: imagePath,
+        originalName: req.file.originalname
+      });
+    } catch (error) {
+      console.error('❌ Error processing upload:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
 });
 
 // Routes
@@ -198,6 +226,19 @@ app.post('/api/events/:eventId/register', async (req, res) => {
 // Add a test route to verify server is running
 app.get('/test', (req, res) => {
   res.json({ message: 'Server is running' });
+});
+
+// Debug route to check upload configuration
+app.get('/api/upload/debug', (req, res) => {
+  res.json({
+    message: 'Upload debug info',
+    uploadsDir: uploadsDir,
+    dirExists: fs.existsSync(uploadsDir),
+    publicDir: path.join(__dirname, 'public'),
+    publicExists: fs.existsSync(path.join(__dirname, 'public')),
+    cwd: process.cwd(),
+    __dirname: __dirname
+  });
 });
 
 // Add this route temporarily for testing
